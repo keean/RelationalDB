@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>RelationalDataModel - Cuboid Database Example</title>
+</head>
+<body>
+RelationalDataModel: Candy Database Example
+<div id="display" style="white-space:pre-wrap"></div>
+Names:
+<div id="kidList" style="white-space:pre-wrap"></div>
+Purchases:
+<div id="purchaseList" style="white-space:pre-wrap"></div>
+<script src="relational.js"></script>
+<script>
+    try {
+        var rdm = new RelationalDataModel;
+        var rdb = new rdm.WebSQLiteDataAdapter;
+
+        var kids = rdm.relation('kids', {
+            id: rdm.attribute('id', rdm.integer, {auto_increment: true}),
+            name: rdm.attribute('name', rdm.string)
+        });
+
+        var candy =  rdm.relation('candy', {
+            id: rdm.attribute('id', rdm.integer, {auto_increment: true}),
+            name: rdm.attribute('name', rdm.string)
+        });
+
+        var candySales = rdm.relation('candySales', {
+            kid: rdm.attribute('kid', rdm.integer),
+            candy: rdm.attribute('candy', rdm.integer),
+            date: rdm.attribute('date', rdm.string)
+        });
+
+        var v = rdb.validate('CandyDB', 1.0, [kids, candy, candySales], true).onsuccess = function(db) {
+            // new database has been created, or existing database has been _validated_
+        
+            var i = db.transaction(function(tx) {
+                [
+                    {id: 1, name: 'Anna'},
+                    {id: 2, name: 'Betty'},
+                    {id: 3, name: 'Christine'}
+
+                ].forEach(function(k) {
+                    tx.insert(kids, k).onsuccess = function(id) {
+                        document.getElementById('display').textContent +=
+                            '\tSaved record for ' + k.name + ' with id ' + id + '\n';
+                    };
+                });
+
+                [
+                    {id: 1, name: 'toffee-apple'},
+                    {id: 2, name: 'bonbon'}
+
+                ].forEach(function(c) {
+                    tx.insert(candy, c).onsuccess = function(id) {
+                        document.getElementById('display').textContent +=
+                            '\tSaved record for ' + c.name + ' with id ' + id + '\n';
+                    };
+                });
+
+                [
+                    {kid: 1, candy: 1, date: '1/1/2010'},
+                    {kid: 1, candy: 2, date: '2/1/2010'},
+                    {kid: 2, candy: 2, date: '2/1/2010'},
+                    {kid: 3, candy: 1, date: '1/1/2010'},
+                    {kid: 3, candy: 1, date: '2/1/2010'},
+                    {kid: 3, candy: 1, date: '3/1/2010'}
+
+                ].forEach(function(s) {
+                    tx.insert(candySales, s).onsuccess = function(id) {
+                        document.getElementById('display').textContent +=
+                            '\tSaved record for ' + s.kid + '/' + s.candy + ' with id ' + id + '\n';
+                    };
+                });
+            });
+
+            i.onsuccess = function() {
+                var q1 = db.transaction(function(tx) {
+
+                    tx.query(kids.project({name: kids.attributes.name})).onsuccess = function(results) {
+                        results.forEach(function(item) {
+                            document.getElementById('kidList').textContent += '\t' + item.name + '\n';
+                        });
+                    };
+
+                });
+
+                q1.onerror = function(e) {alert(e.stack);}
+
+                q1.onsuccess = function() {
+                    var q2 = db.transaction(function(tx) {
+
+                        tx.query(
+
+                            kids.join(candySales, kids.attributes.id.eq(candySales.attributes.kid))
+                            .group(kids.attributes.id)
+                            .project({name: kids.attributes.name, count: kids.attributes.id.count()})
+
+                        ).onsuccess = function(results) {
+
+                            var display = document.getElementById('purchaseList');  
+                            results.forEach(function(item) {
+                                display.textContent += '\t' + item.name + ' bought ' + item.count + ' pieces\n';
+                            });
+
+                        };
+                    });
+
+                    q2.onerror = function(e) {alert(e.stack)}
+                };
+            };
+        }
+
+    } catch (e) {
+        alert (e.stack);
+    }
+
+</script>
+</body>
+</html>
