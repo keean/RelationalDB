@@ -1,6 +1,11 @@
 function RelationalDataModel() {
-    var this_rdm = this;
-    var name_regex = /^[A-Za-z][_0-9A-Za-z]*$/;
+    var this_rdm = this,
+        name_regex = /^[A-Za-z][_0-9A-Za-z]*$/,
+        freeze = Object.freeze;
+
+    if (freeze === undefined) {
+        freeze = function(a) {return a;};
+    }
 
     //--------------------------------------------------------------------
     // Domains
@@ -25,19 +30,19 @@ function RelationalDataModel() {
         this.qualifiers = qualifiers;
     }
 
-    TInteger.prototype = Object.freeze(new Type('integer', TInteger));
-    TNumber.prototype = Object.freeze(new Type('number', TNumber));
-    TString.prototype = Object.freeze(new Type('string', TString));
-    TBoolean.prototype = Object.freeze(new Type('boolean', TBoolean));
+    TInteger.prototype = freeze(new Type('integer', TInteger));
+    TNumber.prototype = freeze(new Type('number', TNumber));
+    TString.prototype = freeze(new Type('string', TString));
+    TBoolean.prototype = freeze(new Type('boolean', TBoolean));
 
-    TEnum.prototype = Object.freeze(new Type('enum', TEnum));
+    TEnum.prototype = freeze(new Type('enum', TEnum));
 
-    TDomain.prototype = Object.freeze(new Type('domain', TDomain));
+    TDomain.prototype = freeze(new Type('domain', TDomain));
 
-    this.integer = Object.freeze(new TInteger);
-    this.number = Object.freeze(new TNumber);
-    this.string = Object.freeze(new TString);
-    this.boolean = Object.freeze(new TBoolean);
+    this.integer = freeze(new TInteger);
+    this.number = freeze(new TNumber);
+    this.string = freeze(new TString);
+    this.boolean = freeze(new TBoolean);
 
     this.enum = function(values) {
         for (var key in values) if (values.hasOwnProperty(key)) {
@@ -46,7 +51,7 @@ function RelationalDataModel() {
             }
         }
 
-        return Object.freeze(new TEnum(values));
+        return freeze(new TEnum(values));
     };
 
     function EnumValue(domain, value) {
@@ -75,7 +80,7 @@ function RelationalDataModel() {
             }
         }
 
-        return Object.freeze(d);
+        return freeze(d);
     };
 
     function subtype(a, b) { 
@@ -147,28 +152,28 @@ function RelationalDataModel() {
         this.unique = unique;
     }
 
-    EEq.prototype = Object.freeze(new Expression('eq', EEq));
-    ELt.prototype = Object.freeze(new Expression('lt', ELt));
-    EGt.prototype = Object.freeze(new Expression('gt', EGt));
-    ELe.prototype = Object.freeze(new Expression('le', ELe));
-    EGe.prototype = Object.freeze(new Expression('ge', EGe));
-    ENe.prototype = Object.freeze(new Expression('ne', ENe));
+    EEq.prototype = freeze(new Expression('eq', EEq));
+    ELt.prototype = freeze(new Expression('lt', ELt));
+    EGt.prototype = freeze(new Expression('gt', EGt));
+    ELe.prototype = freeze(new Expression('le', ELe));
+    EGe.prototype = freeze(new Expression('ge', EGe));
+    ENe.prototype = freeze(new Expression('ne', ENe));
 
-    EAnd.prototype = Object.freeze(new Expression('and', EAnd));
-    EOr.prototype = Object.freeze(new Expression('or', EOr));
+    EAnd.prototype = freeze(new Expression('and', EAnd));
+    EOr.prototype = freeze(new Expression('or', EOr));
 
-    EAdd.prototype = Object.freeze(new Expression('add', EAdd));
-    ESub.prototype = Object.freeze(new Expression('sub', ESub));
-    EMul.prototype = Object.freeze(new Expression('mul', EMul));
-    EDiv.prototype = Object.freeze(new Expression('div', EDiv));
-    EMod.prototype = Object.freeze(new Expression('mod', EMod));
+    EAdd.prototype = freeze(new Expression('add', EAdd));
+    ESub.prototype = freeze(new Expression('sub', ESub));
+    EMul.prototype = freeze(new Expression('mul', EMul));
+    EDiv.prototype = freeze(new Expression('div', EDiv));
+    EMod.prototype = freeze(new Expression('mod', EMod));
 
-    ECount.prototype = Object.freeze(new Expression('count', ECount));
-    EAvg.prototype = Object.freeze(new Expression('avg', EAvg));
+    ECount.prototype = freeze(new Expression('count', ECount));
+    EAvg.prototype = freeze(new Expression('avg', EAvg));
 
-    EIn.prototype = Object.freeze(new Expression('in', EIn));
+    EIn.prototype = freeze(new Expression('in', EIn));
 
-    ELiteral.prototype = Object.freeze(new Expression('literal', ELiteral));
+    ELiteral.prototype = freeze(new Expression('literal', ELiteral));
 
 
     var ea_prototype = new Expression('attribute', EAttribute);
@@ -177,16 +182,16 @@ function RelationalDataModel() {
         return (this === attr) || ((this.relation === attr.relation) && attr.unique);
     }
 
-    EAttribute.prototype = Object.freeze(ea_prototype);
+    EAttribute.prototype = freeze(ea_prototype);
 
 
     function wrap_literal(v) {
         switch (typeof(v)) {
-            case 'number': return Object.freeze(new ELiteral((parseInt(v) == v) ? this_rdm.integer : this_rdm.number, v));
-            case 'string': return Object.freeze(new ELiteral(this_rdm.string, "'" + v + "'"));
-            case 'boolean': return Object.freeze(new ELiteral(this_rdm.boolean, v));
+            case 'number': return freeze(new ELiteral((parseInt(v) == v) ? this_rdm.integer : this_rdm.number, v));
+            case 'string': return freeze(new ELiteral(this_rdm.string, "'" + v + "'"));
+            case 'boolean': return freeze(new ELiteral(this_rdm.boolean, v));
             case 'object': switch (v.constructor) {
-                case EnumValue: return Object.freeze(new ELiteral(literal.domain.basetype, "'" + v + "'"));
+                case EnumValue: return freeze(new ELiteral(literal.domain.basetype, "'" + v + "'"));
                 case Expression: return v;
                 default: throw new TypeError("invalid expression '" + v + "'");
             }
@@ -205,7 +210,7 @@ function RelationalDataModel() {
 
         exp.type = this_rdm.boolean;
         exp.args = [l, r];
-        return Object.freeze(exp);
+        return freeze(exp);
     }
 
     function logic(l, rr, exp) {
@@ -221,7 +226,7 @@ function RelationalDataModel() {
 
         exp.type = t;
         exp.args = [l, r];
-        return Object.freeze(exp);
+        return freeze(exp);
     }
 
     function binop(l, rr, exp) {
@@ -237,7 +242,7 @@ function RelationalDataModel() {
 
         exp.type = t;
         exp.args = [l, r];
-        return Object.freeze(exp);
+        return freeze(exp);
     }
 
     function relop(l, r, exp) {
@@ -258,7 +263,7 @@ function RelationalDataModel() {
 
         exp.type = this_rdm.boolean;
         exp.args = [l, r];
-        return Object.freeze(exp);
+        return freeze(exp);
     }
 
     // TODO: restrict aggregate use to valid cases.
@@ -267,7 +272,7 @@ function RelationalDataModel() {
         exp.type = this_rdm.number;
         exp.aggregate = true;
         exp.args = [l];
-        return Object.freeze(exp);
+        return freeze(exp);
     }
 
     function numagg(l, exp) {
@@ -278,7 +283,7 @@ function RelationalDataModel() {
         exp.type = this_rdm.number;
         exp.aggregate = true;
         exp.args = [l];
-        return Object.freeze(exp);
+        return freeze(exp);
     }
 
     // comparison operators
@@ -384,7 +389,7 @@ function RelationalDataModel() {
             unique = true;
         }
                         
-        return Object.freeze(new EAttribute(name, type, qualifiers, unique));
+        return freeze(new EAttribute(name, type, qualifiers, unique));
     };
 
     //--------------------------------------------------------------------
@@ -414,8 +419,8 @@ function RelationalDataModel() {
         this.orders = relation.orders;
     }
 
-    RTable.prototype = Object.freeze(new Relation('table', RTable));
-    RDerived.prototype = Object.freeze(new Relation('derived', RDerived));
+    RTable.prototype = freeze(new Relation('table', RTable));
+    RDerived.prototype = freeze(new Relation('derived', RDerived));
     
     // check if all attributes used in an expression come from a relation
     function valid_expression(rel, exp) {
@@ -507,7 +512,7 @@ function RelationalDataModel() {
 
         var r = new RDerived(this);
         r.attributes = attributes;
-        return Object.freeze(r);
+        return freeze(r);
     };
 
     Relation.prototype.restrict = function(exp) {
@@ -521,7 +526,7 @@ function RelationalDataModel() {
 
         var r = new RDerived(this);
         r.restrictions = r.restrictions.concat([exp]);
-        return Object.freeze(r);
+        return freeze(r);
     };
 
     Relation.prototype.join = function(relation, exp) {
@@ -550,7 +555,7 @@ function RelationalDataModel() {
             throw new TypeError('join on argument is not a valid expression');
         }
 
-        return Object.freeze(r);
+        return freeze(r);
     };
 
 
@@ -576,7 +581,7 @@ function RelationalDataModel() {
         var r = new RDerived(this);
         r.groups.push(exp);
         //exp.attributes.forEach(function(a) {
-        return Object.freeze(r);
+        return freeze(r);
     };
 
     Relation.prototype.order = function(exp) {
@@ -586,7 +591,7 @@ function RelationalDataModel() {
 
         var r = new RDerived(this);
         r.orders.push(exp);
-        return Object.freeze(r);
+        return freeze(r);
     };
 
     this.relation = function(name, attributes, qualifiers) {
@@ -607,10 +612,10 @@ function RelationalDataModel() {
                 n = new EAttribute(t.name, t.type, t.qualifiers, t.unique);
 
             n.relation = r;
-            r.attributes[a] = Object.freeze(n);
+            r.attributes[a] = freeze(n);
         }
 
-        return Object.freeze(r);
+        return freeze(r);
     };
 
     //--------------------------------------------------------------------
@@ -753,12 +758,12 @@ function RelationalDataModel() {
             var sql = '';
             for (var key in relation.attributes) if (relation.attributes.hasOwnProperty(key)) {
                 var att = relation.attributes[key];
-                if (sql != '') {
+                if (sql !== '') {
                     sql += ', ';
                 }
                 sql += att.name + ' ' + type_to_affinity(att.type);
                 var qal = att.qualifiers;
-                if (qal != undefined) {
+                if (qal !== undefined) {
                     if (qal.auto_increment === true) {
                         sql += ' primary key autoincrement';
                     } else if (qal.primary_key === true) {
@@ -879,7 +884,7 @@ function RelationalDataModel() {
                     } 
                 },
                 function() {
-                    validate.onsuccess(Object.freeze(new ValidDb(db)));
+                    validate.onsuccess(freeze(new ValidDb(db)));
                 }
             );
             return validate;
