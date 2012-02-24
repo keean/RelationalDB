@@ -1,4 +1,4 @@
-function RelationalDataModel() {
+var RelationalDataModel = function() {
     var this_rdm = this,
         name_regex = /^[A-Za-z][_0-9A-Za-z]*$/,
         freeze = Object.freeze;
@@ -10,21 +10,21 @@ function RelationalDataModel() {
     //--------------------------------------------------------------------
     // Domains
 
-    function Type(name, id) {
+    var Type = function(name, id) {
         this.id = id;
         this.name = name;
     }
 
-    function TInteger() {}
-    function TNumber() {}
-    function TString() {}
-    function TBoolean() {}
+    var TInteger = function() {}
+    var TNumber = function() {}
+    var TString = function() {}
+    var TBoolean = function() {}
 
-    function TEnum(values) {
+    var TEnum = function(values) {
         this.values = values;
     }
 
-    function TDomain(name, type, qualifiers) {
+    var TDomain = function(name, type, qualifiers) {
         this.name = name;
         this.basetype = type;
         this.qualifiers = qualifiers;
@@ -887,6 +887,481 @@ function RelationalDataModel() {
                     validate.onsuccess(freeze(new ValidDb(db)));
                 }
             );
+            return validate;
+        };
+
+        function Transaction() {}
+
+        ValidDb.prototype.transaction = function(transfn) {
+            var transaction = new Transaction;
+            this.db.transaction(
+                function(tx) {
+                    transaction.tx = tx;
+                    try {
+                        transfn(transaction);
+                    } catch(e) {
+                        transaction.error = e;
+                        alert(e.stack);
+                        throw e;
+                    }
+                },
+                function(error) {
+                    if (transaction.error !== undefined) {
+                        error.message = error.message + ' ['
+                            + transaction.error.name + ': '
+                            + transaction.error.message + ']';
+                        error.stack = transaction.error.stack;
+                    }
+
+                    if (transaction.onerror !== undefined) {
+                        transaction.onerror(error);
+                    } else {
+                        throw error;
+                    }
+                },
+                function() {
+                    if (transaction.onsuccess !== undefined) {
+                        transaction.onsuccess();
+                    }
+                }
+            );
+            return transaction;
+        };
+
+        function Query() {}
+        
+        function Result(result) {
+            var rows = result.rows;
+
+            this.forEach = function(f) {
+                try {
+                    var i = 0,
+                        row = rows.item(0);
+                    while (row !== null) {
+                        f(row);
+                        i += 1;
+                        row = rows.item(i);
+                    }
+                } catch(e) {
+                    if (e.name !== 'RangeError') {
+                        throw e;
+                    }
+                }
+            }
+        }
+
+        Transaction.prototype.query = function(relation) {
+            if (relation.constructor !== Relation) {
+                throw new TypeError('invalid relation');
+            }
+            
+            var this_transaction = this,
+                query = new Query,
+                s = relation_to_select(relation, true);
+
+            alert(s);
+            this.tx.executeSql(s, [],
+                function(t, r) {
+                    if (query.onsuccess !== undefined) {
+                        try {
+                            if (relation_singleton(relation)) {
+                                query.onsuccess(r.rows.item(0));
+                            } else {
+                                query.onsuccess(new Result(r));
+                            }
+                        } catch(e) {
+                            this_transaction.error = e;
+                            throw e;
+                        }
+                    }
+                },
+                function(t, e) {
+                    if (query.onerror !== undefined) {
+                        try {
+                            query.onerror(e);
+                            return false;
+                        } catch(e) {
+                            this_transaction.error = e;
+                            throw e;
+                        }
+                    } else {
+                        this_transaction.error = e;
+                        return true;
+                    }
+                }
+            );
+            return query;
+        };
+
+        function Insert() {}
+
+        Transaction.prototype.insert = function(relation, row) {
+            if (relation.constructor !== Relation) {
+                throw new TypeError('invalid relation');
+            }
+
+            if (relation.id !== RTable) {
+                throw new TypeError('relation is not insertable');
+            }
+
+            var this_transaction = this,
+                insert = new Insert,
+                s = row_to_insert(relation, row);
+
+            //alert(s);
+            this.tx.executeSql(s, [],
+                function(t, r) {
+                    if (insert.onsuccess !== undefined) {
+                        try {
+                            insert.onsuccess(r.insertId);
+                        } catch(e) {
+                            this_transaction.error = e;
+                            throw e;
+                        }
+                    }
+                },
+                function(t, e) {
+                    if (insert.onerror !== undefined) {
+                        try {
+                            insert.onerror(e);
+                            return false;
+                        } catch(e) {
+                            this_transaction.error = e;
+                            throw e;
+                        }
+                    } else {
+                        this_transaction.error = e;
+                        return true;
+                    }
+                }
+            );
+            return insert;
+        };
+
+        Transaction.prototype.update = function(relation, row, exp, success) {
+            if (relation.constructor !== Relation) {
+                throw new TypeError('invalid relation');
+            }
+
+            if (relation.id !== RTable) {
+                throw new TypeError('relation is not updateable');
+            }
+            
+            var s = row_to_update(relation, row, exp);
+            alert(s);
+            this.tx.executeSql(s, [], function(tx, result) {
+                if (success !== undefined) {
+                    success(result.rowsAffected);
+                }
+            });
+        };
+
+        function Remove() {}
+
+        Transaction.prototype.remove  = function(relation, exp) {
+            if (relation.constructor !== Relation) {
+                throw new TypeError('invalid relation');
+            }
+
+            if (relation.id !== RTable) {
+                throw new TypeError('relation is not updateable');
+            }
+
+            var this_transaction = this,
+                remove = new Remove,
+                s = relation_to_remove(relation, exp);
+
+            alert(s);
+            this.tx.executeSql(s, [], 
+                function(t, r) {
+                    if (remove.onsuccess !== undefined) {
+                        try {
+                            remove.onsuccess(r.rowsAffected);
+                        } catch(e) {
+                            this_transaction.error = e;
+                            throw e;
+                        }
+                    }
+                },
+                function(t, e) {
+                    if (remove.onerror !== undefined) {
+                        try {
+                            remove.onerror(e);
+                            return false;
+                        } catch(e) {
+                            this_transaction.error = e;
+                            throw e;
+                        }
+                    } else {
+                        this_transaction.error = e;
+                        return true;
+                    }
+                }
+            );
+            return remove;
+        }
+    };
+
+    //--------------------------------------------------------------------
+    // PostgreSQL adapter.
+    //
+
+    this.PostgreSQLDataAdapter = function() {
+
+        function expression_to_sql(exp, qualified) {
+            switch(exp.id) {
+            case EEq:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' = ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case ELt:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' < ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EGt:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' > ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case ELe:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' <= ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EGe:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' >= ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case ENe:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' != ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EAnd:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' and ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EOr:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' or ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EAdd:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' + ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case ESub:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' - ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EMul:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' * ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EDiv:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' / ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case EMod:
+                return '(' + expression_to_sql(exp.args[0], qualified)
+                    + ' % ' + expression_to_sql(exp.args[1], qualified) + ')';
+            case ECount:
+                return 'count(' + expression_to_sql(exp.args[0], qualified) + ')';
+            case EAvg:
+                return 'avg(' + expression_to_sql(exp.args[0], qualified) + ')';
+            case EIn:
+                return expression_to_sql(exp.args[0], qualified)
+                    + ' in (' + relation_to_select(exp.args[1], qualified) + ')';
+            case ELiteral:
+                return exp.value;
+            case EAttribute:
+                return qualified ? exp.relation.sources[0] + '.' + exp.name : exp.name;
+            default:
+                throw new Error('unimplemented expression type');
+            }
+        }
+
+        function attributes_to_columns(attributes, qualified, rename) {
+            var sql = '';
+
+            for (var key in attributes) if (attributes.hasOwnProperty(key)) {
+                var a = attributes[key];
+                sql += ((sql !== '') ? ', ' : '') + expression_to_sql(a, qualified)
+                if (rename && ((a.id !== EAttribute) || (a.name !== key))) {
+                    sql += ' as ' + key;
+                }
+            }
+
+            return sql;
+        }
+
+        function restrictions_to_where(restrictions, qualified) {
+            var sql = '';
+
+            restrictions.forEach(function(restriction) {
+                sql += ((sql !== '') ? ' and ' : '') + expression_to_sql(restriction, qualified);
+            });
+
+            return sql;
+        }
+
+        function groups_to_groupby(groups, qualified) {
+            var sql = '';
+
+            groups.forEach(function(group) {
+                sql += ((sql !== '') ? ', ' : '') + expression_to_sql(group, qualified);
+            });
+
+            return sql;
+        }
+
+        function relation_to_select(relation, rename) {
+            var qualified = (relation.sources.length > 1);
+            return 'select ' + attributes_to_columns(relation.attributes, qualified, rename) 
+                + ' from ' + relation.sources.join(', ')
+                + ((relation.restrictions.length > 0)
+                    ? ' where ' + restrictions_to_where(relation.restrictions, qualified)
+                    : '')
+                + ((relation.groups.length > 0)
+                    ? ' group by ' + groups_to_groupby(relation.groups, qualified) 
+                    : '');
+        }
+
+        function type_to_affinity(type) {
+            switch(type.id) {
+                case TInteger: return 'integer';
+                case TNumber: return 'numeric';
+                case TString: return 'text';
+                case TBoolean: return 'integer';
+                case TEnum: return 'text';
+                case TDomain: switch(type.basetype.id) {
+                    case TInteger: return 'integer';
+                    case TNumber: return 'numeric';
+                    case TString: return 'text';
+                    case TBoolean: return 'integer';
+                    case TEnum: return 'text';
+                    default: throw new TypeError('unsupported attribute domain type');
+                }
+                default: throw new TypeError('unsupported attribute type');
+            }
+        }
+
+        function relation_to_create(relation) {
+            if (relation.id !== RTable) {
+                throw new TypeError('relation is not createable');
+            }
+
+            var sql = '';
+            for (var key in relation.attributes) if (relation.attributes.hasOwnProperty(key)) {
+                var att = relation.attributes[key];
+                if (sql !== '') {
+                    sql += ', ';
+                }
+                sql += att.name + ' ' + type_to_affinity(att.type);
+                var qal = att.qualifiers;
+                if (qal !== undefined) {
+                    if (qal.auto_increment === true) {
+                        sql += ' primary key autoincrement';
+                    } else if (qal.primary_key === true) {
+                        sql += ' primary key';
+                    }
+                    if (qal.unique === true) {
+                        sql += ' unique';
+                    }
+                    if (qal.not_null === true) {
+                        sql += ' not null';
+                    }
+                    if (qal.default !== undefined) {
+                        sql += ' default ' + att.qualifiers['default'];
+                    }
+                }
+            }
+
+            return 'create table ' + relation.sources[0] + ' (' + sql + ')';
+        }
+
+        function row_to_insert(relation, row) {
+            var attrs = [],
+                values = [];
+
+            for (var key in row) if (row.hasOwnProperty(key)) {
+                if (relation.attributes[key] === undefined) {
+                    throw new TypeError("invalid key '" + key + "' for relation '" + relation.name + "'");
+                }
+
+                var value = wrap_literal(row[key]);
+                if (!valid_expression(relation, value)) {
+                    throw new TypeError('invalid expression');
+                }
+
+                attrs.push(key);
+                values.push(expression_to_sql(value));
+            }
+
+            return 'insert into ' + relation.sources[0] + ' (' + attrs.join() + ') values (' + values.join() + ')';
+        }
+
+        function row_to_update(relation, row, exp) {
+            var set = [];
+
+            for (var key in row) if (row.hasOwnProperty(key)) {
+                if (relation.attributes[key] === undefined) {
+                    throw new TypeError("invalid key '" + key + "' for relation '" + relation.name + "'");
+                }
+
+                var value = wrap_literal(row[key]);
+                if (!valid_expression(relation, value)) {
+                    throw new TypeError('invalid expression');
+                }
+
+                set.push(key + ' = ' + expression_to_sql(value));
+            }
+
+            var sql = 'update ' + relation.sources[0] + ' set ' + set.join();
+            if (exp !== undefined) {
+                if (!valid_expression(relation, exp)) {
+                    throw new TypeError('invalid expression');
+                }
+
+                sql += ' where ' + expression_to_sql(exp);
+            }
+
+            return sql;
+        }
+
+        function relation_to_remove(relation, exp) {
+            var sql = 'delete from ' + relation.sources[0];
+            if (exp !== undefined) {
+                sql += ' where ' + expression_to_sql(exp);
+            }
+            return sql;
+        }
+
+        function validate_table(tx, relation) {
+            tx.executeSql("select sql from sqlite_master where type='table' and name=?", [relation.name],
+                function(tx, results) {
+                    var sql = relation_to_create(relation);
+                    //alert(sql);
+                    if (results.rows.length === 1) {
+                        if (sql !== results.rows.item(0).sql.toLowerCase()) {
+                            throw new TypeError("relation '" + relation.name + "'validation failed");
+                        }
+                    } else {
+                        tx.executeSql(sql, []);
+                    }
+                }
+            );
+        }
+
+        function Validate() {}
+
+        function ValidDb(db) {
+            this.db = db;
+        }
+
+        this_sql = this;
+
+        this.validate = function(name, version, relations, drop) {
+            var validate = new Validate;
+                //db = openDatabase(this.name, this.version, "relaional data model v1.0", 4096);
+            require('pg').native.connect(this.name, function(err, client) {
+                if (err) {
+                    validate.onerror(err);
+                } else {
+                    client.on('error', validate.onerror);
+                    relations.forEach(function(r) {
+                        if (drop) {
+                            client.query('drop table if exists ' + r.sources[0]);
+                        }
+                        validate_table(client, r);
+                    });
+                    validate.onsuccess(freeze(new ValidDb(db)));
+                }
+            });
             return validate;
         };
 
