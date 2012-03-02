@@ -32,7 +32,7 @@ Purchases:
             date: rdm.attribute('date', rdm.string)
         });
 
-        var v = rdb.validate('CandyDB', 1.0, [kids, candy, candySales], true).onsuccess = function(db) {
+        rdb.validate('CandyDB', 1.0, [kids, candy, candySales], true).onsuccess = function(db) {
             // new database has been created, or existing database has been _validated_
         
             var i = db.transaction(function(tx) {

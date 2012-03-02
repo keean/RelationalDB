@@ -867,7 +867,7 @@ var RelationalDataModel = function() {
 
         this.validate = function(name, version, relations, drop) {
             var validate = new Validate,
-                db = openDatabase(this.name, this.version, "relaional data model v1.0", 4096);
+                db = openDatabase(name, version, "relaional data model v1.0", 4096);
 
             db.transaction(
                 function(tx) {
@@ -1230,22 +1230,27 @@ var RelationalDataModel = function() {
             }
         }
 
-        function relation_to_create(relation) {
+        function create_table(client, relation) {
             if (relation.id !== RTable) {
                 throw new TypeError('relation is not createable');
             }
 
-            var sql = '';
+            var sql = 'create table ' + relation.sources[0] + ' (';
+            var first = true;
             for (var key in relation.attributes) if (relation.attributes.hasOwnProperty(key)) {
                 var att = relation.attributes[key];
-                if (sql !== '') {
+                if (first) {
+                    first = false;
+                } else {
                     sql += ', ';
                 }
                 sql += att.name + ' ' + type_to_affinity(att.type);
                 var qal = att.qualifiers;
                 if (qal !== undefined) {
                     if (qal.auto_increment === true) {
-                        sql += ' primary key autoincrement';
+                        var seq = relation.name + '_'  + att.name + '_seq';
+                        client.query('create sequence ' + seq);
+                        sql += " primary key default nextval('" + seq + "')";
                     } else if (qal.primary_key === true) {
                         sql += ' primary key';
                     }
@@ -1261,7 +1266,8 @@ var RelationalDataModel = function() {
                 }
             }
 
-            return 'create table ' + relation.sources[0] + ' (' + sql + ')';
+            console.log('[' + sql + ')]');
+            client.query(sql + ')');
         }
 
         function row_to_insert(relation, row) {
@@ -1282,7 +1288,7 @@ var RelationalDataModel = function() {
                 values.push(expression_to_sql(value));
             }
 
-            return 'insert into ' + relation.sources[0] + ' (' + attrs.join() + ') values (' + values.join() + ')';
+            return 'insert into ' + relation.sources[0] + ' (' + attrs.join() + ') values (' + values.join() + ') returning *';
         }
 
         function row_to_update(relation, row, exp) {
@@ -1321,21 +1327,50 @@ var RelationalDataModel = function() {
             return sql;
         }
 
-        function validate_table(tx, relation) {
-            tx.executeSql("select sql from sqlite_master where type='table' and name=?", [relation.name],
-                function(tx, results) {
-                    var sql = relation_to_create(relation);
-                    //alert(sql);
-                    if (results.rows.length === 1) {
-                        if (sql !== results.rows.item(0).sql.toLowerCase()) {
-                            throw new TypeError("relation '" + relation.name + "'validation failed");
-                        }
-                    } else {
-                        tx.executeSql(sql, []);
-                    }
+        function validate_table(client, relation) {
+            client.query("select column_name from information_schema.columns where table_name=$1", [relation.name],
+                function(err, results) {
+                    create_table(client, relation);
+                    //if (results.rows.length > 0) {
+                    //    if (sql !== results.rows.item(0).sql.toLowerCase()) {
+                    //        throw new TypeError("relation '" + relation.name + "'validation failed");
+                    //    }
+                    //} else {
+                    //    client.query(sql);
+                    //}
                 }
             );
         }
+
+        var pg_begin = function(client, f) {
+            console.log('[transaction begin]');
+            //client.pauseDrain();
+            client.query('begin', f);
+        };
+
+        var pg_commit = function(client, f) {
+            client.query('commit', function(err, result) {
+                console.log('[transacion commit]');
+                //client.resumeDrain();
+                if (f !== undefined) {
+                    f(err, result);
+                }
+            });
+        }; 
+
+        var pg_rollback = function(client, f) {
+            client.query('rollback', function(err, result) {
+                console.log('[transaction rollback]');
+                //client.resumeDrain();
+                if (f !== undefined) {
+                    f(err, result);
+                }
+            });
+        };
+
+        var pg_sleep = function(client, s, f) {
+            client.query('select pg_sleep(' + s + ')', f);
+        };
 
         function Validate() {}
 
@@ -1347,59 +1382,87 @@ var RelationalDataModel = function() {
 
         this.validate = function(name, version, relations, drop) {
             var validate = new Validate;
-                //db = openDatabase(this.name, this.version, "relaional data model v1.0", 4096);
-            require('pg').native.connect(this.name, function(err, client) {
-                if (err) {
-                    validate.onerror(err);
+            var pg = require('pg');
+            pg.connect(name, function(err, client) {
+                if (err !== null) {
+                    if (validate.onerror !== undefined) {
+                        console.log('[' + err + ']');
+                        validate.onerror(err);
+                    }
                 } else {
-                    client.on('error', validate.onerror);
+                    
+                    console.log('[validation begin]');
+                    client.once('error', function(error) {
+                        console.log('[' + error + ']');
+                        if (validate.onerror !== undefined) {
+                            validate.onerror(error);
+                        }
+                    });
+                    client.once('drain', function() {
+                        console.log('[validation end]');
+                        if (validate.onsuccess !== undefined) {
+                            validate.onsuccess(freeze(new ValidDb(client)));
+                        }
+                    });
                     relations.forEach(function(r) {
                         if (drop) {
                             client.query('drop table if exists ' + r.sources[0]);
                         }
                         validate_table(client, r);
                     });
-                    validate.onsuccess(freeze(new ValidDb(db)));
+                    //client.emit('error', 'test');
+                    //pg_sleep(client, 3);
                 }
             });
             return validate;
         };
 
+        var EventEmitter = require('events').EventEmitter;
+        var util = require('util');
+
         function Transaction() {}
 
         ValidDb.prototype.transaction = function(transfn) {
             var transaction = new Transaction;
-            this.db.transaction(
-                function(tx) {
-                    transaction.tx = tx;
-                    try {
-                        transfn(transaction);
-                    } catch(e) {
-                        transaction.error = e;
-                        alert(e.stack);
-                        throw e;
-                    }
-                },
-                function(error) {
-                    if (transaction.error !== undefined) {
-                        error.message = error.message + ' ['
-                            + transaction.error.name + ': '
-                            + transaction.error.message + ']';
-                        error.stack = transaction.error.stack;
-                    }
-
+            var db = this.db;
+            pg_begin(db, function(error, result) {
+                if (error !== null) {
+                    console.log('[' + error + ']');
                     if (transaction.onerror !== undefined) {
                         transaction.onerror(error);
-                    } else {
-                        throw error;
-                    }
-                },
-                function() {
-                    if (transaction.onsuccess !== undefined) {
-                        transaction.onsuccess();
-                    }
+                    } 
+                } else {
+                    db.on('error', function(error) {
+                        console.log('transaction-error [' + error + ']');
+                        pg_rollback(db, function() {
+                            if (transaction.onerror !== undefined) {
+                                transaction.onerror(error);
+                            }
+                        });
+                    });
+                    db.once('drain', function() {
+                        console.log('transaction-end');
+                        pg_commit(db, function(e) {
+                            if (e === null) {
+                                e = transaction.error;
+                            }
+                            if (e !== null) {
+                                console.log('transaction [' + e + ']');
+                                if (transaction.onerror !== undefined) {
+                                    transaction.onerror(e);
+                                }
+                            } else {
+                                if (transaction.onsuccess !== undefined) {
+                                    transaction.onsuccess();
+                                }
+                            }
+                        });
+                    });
+                    console.log('transaction-begin');
+                    transaction.tx = db;
+                    transfn(transaction);
                 }
-            );
+            });
             return transaction;
         };
 
@@ -1483,33 +1546,20 @@ var RelationalDataModel = function() {
                 insert = new Insert,
                 s = row_to_insert(relation, row);
 
-            //alert(s);
-            this.tx.executeSql(s, [],
-                function(t, r) {
+            console.log('[' + s + ']');
+            this.tx.query(s, function(e, r) {
+                if (e === null) {
                     if (insert.onsuccess !== undefined) {
-                        try {
-                            insert.onsuccess(r.insertId);
-                        } catch(e) {
-                            this_transaction.error = e;
-                            throw e;
-                        }
+                        insert.onsuccess(r.rows[0]);
                     }
-                },
-                function(t, e) {
+                } else {
+                    console.log('insert [' + e + ']');
+                    this_transaction.error += e + '\n';
                     if (insert.onerror !== undefined) {
-                        try {
-                            insert.onerror(e);
-                            return false;
-                        } catch(e) {
-                            this_transaction.error = e;
-                            throw e;
-                        }
-                    } else {
-                        this_transaction.error = e;
-                        return true;
+                        insert.onerror(e);
                     }
                 }
-            );
+            });
             return insert;
         };
 
@@ -1577,3 +1627,5 @@ var RelationalDataModel = function() {
         }
     };
 }
+
+exports.RelationalDataModel = RelationalDataModel;
