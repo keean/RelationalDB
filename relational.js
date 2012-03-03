@@ -790,7 +790,7 @@ var RelationalDataModel = function() {
 
             for (var key in row) if (row.hasOwnProperty(key)) {
                 if (relation.attributes[key] === undefined) {
-                    throw new TypeError("invalid key '" + key + "' for relation '" + relation.name + "'");
+                    throw new TypeError("invalid attribute '" + key + "' for relation '" + relation.name + "'");
                 }
 
                 var value = wrap_literal(row[key]);
@@ -810,7 +810,7 @@ var RelationalDataModel = function() {
 
             for (var key in row) if (row.hasOwnProperty(key)) {
                 if (relation.attributes[key] === undefined) {
-                    throw new TypeError("invalid key '" + key + "' for relation '" + relation.name + "'");
+                    throw new TypeError("invalid attribute '" + key + "' for relation '" + relation.name + "'");
                 }
 
                 var value = wrap_literal(row[key]);
@@ -1276,7 +1276,7 @@ var RelationalDataModel = function() {
 
             for (var key in row) if (row.hasOwnProperty(key)) {
                 if (relation.attributes[key] === undefined) {
-                    throw new TypeError("invalid key '" + key + "' for relation '" + relation.name + "'");
+                    throw new TypeError("invalid attribute '" + key + "' for relation '" + relation.name + "'");
                 }
 
                 var value = wrap_literal(row[key]);
@@ -1296,7 +1296,7 @@ var RelationalDataModel = function() {
 
             for (var key in row) if (row.hasOwnProperty(key)) {
                 if (relation.attributes[key] === undefined) {
-                    throw new TypeError("invalid key '" + key + "' for relation '" + relation.name + "'");
+                    throw new TypeError("invalid attribute '" + key + "' for relation '" + relation.name + "'");
                 }
 
                 var value = wrap_literal(row[key]);
@@ -1350,7 +1350,7 @@ var RelationalDataModel = function() {
 
         var pg_commit = function(client, f) {
             client.query('commit', function(err, result) {
-                console.log('[transacion commit]');
+                console.log('[transaction commit]');
                 //client.resumeDrain();
                 if (f !== undefined) {
                     f(err, result);
@@ -1420,118 +1420,68 @@ var RelationalDataModel = function() {
         var EventEmitter = require('events').EventEmitter;
         var util = require('util');
 
-        function Transaction() {}
+        function Transaction() {
+            EventEmitter.call(this);
+        }
+        util.inherits(Transaction, EventEmitter);
 
         ValidDb.prototype.transaction = function(transfn) {
-            var transaction = new Transaction;
-            var db = this.db;
-            pg_begin(db, function(error, result) {
-                if (error !== null) {
-                    console.log('[' + error + ']');
-                    if (transaction.onerror !== undefined) {
-                        transaction.onerror(error);
-                    } 
-                } else {
-                    db.on('error', function(error) {
-                        console.log('transaction-error [' + error + ']');
-                        pg_rollback(db, function() {
-                            if (transaction.onerror !== undefined) {
-                                transaction.onerror(error);
-                            }
-                        });
+            var transaction = new Transaction,
+                db = this.db;
+
+            db.query('begin').on('error', function(e) {
+                transaction.emit('error', e);
+            }).on('end', function() {
+                db.once('drain', function() {
+                    db.query('commit').on('error', function(e) {
+                        transaction.emit('error', e);
+                    }).on('end', function() {
+                        console.log('[transaction end]');
+                        transaction.emit('end');
                     });
-                    db.once('drain', function() {
-                        console.log('transaction-end');
-                        pg_commit(db, function(e) {
-                            if (e === null) {
-                                e = transaction.error;
-                            }
-                            if (e !== null) {
-                                console.log('transaction [' + e + ']');
-                                if (transaction.onerror !== undefined) {
-                                    transaction.onerror(e);
-                                }
-                            } else {
-                                if (transaction.onsuccess !== undefined) {
-                                    transaction.onsuccess();
-                                }
-                            }
-                        });
-                    });
-                    console.log('transaction-begin');
-                    transaction.tx = db;
-                    transfn(transaction);
-                }
+                });
+                console.log('[transaction begin]');
+                transaction.tx = db;
+                transfn(transaction);
             });
             return transaction;
         };
 
-        function Query() {}
-        
-        function Result(result) {
-            var rows = result.rows;
-
-            this.forEach = function(f) {
-                try {
-                    var i = 0,
-                        row = rows.item(0);
-                    while (row !== null) {
-                        f(row);
-                        i += 1;
-                        row = rows.item(i);
-                    }
-                } catch(e) {
-                    if (e.name !== 'RangeError') {
-                        throw e;
-                    }
-                }
-            }
+        function Select() {
+            EventEmitter.call(this);
         }
-
-        Transaction.prototype.query = function(relation) {
+        util.inherits(Select, EventEmitter);
+        
+        Transaction.prototype.select = function(relation) {
             if (relation.constructor !== Relation) {
                 throw new TypeError('invalid relation');
             }
             
             var this_transaction = this,
-                query = new Query,
+                select = new Select,
                 s = relation_to_select(relation, true);
 
-            alert(s);
-            this.tx.executeSql(s, [],
-                function(t, r) {
-                    if (query.onsuccess !== undefined) {
-                        try {
-                            if (relation_singleton(relation)) {
-                                query.onsuccess(r.rows.item(0));
-                            } else {
-                                query.onsuccess(new Result(r));
-                            }
-                        } catch(e) {
-                            this_transaction.error = e;
-                            throw e;
-                        }
-                    }
-                },
-                function(t, e) {
-                    if (query.onerror !== undefined) {
-                        try {
-                            query.onerror(e);
-                            return false;
-                        } catch(e) {
-                            this_transaction.error = e;
-                            throw e;
-                        }
-                    } else {
-                        this_transaction.error = e;
-                        return true;
-                    }
+            console.log('[' + s + ']');
+
+            this.tx.query(s).on('error', function(e) {
+                if (select.listeners('error').length > 0) {
+                    select.emit('error', e);
+                } else {
+                    this_transaction.emit('error', e);
                 }
-            );
-            return query;
+            }).on('row', function(r) {
+                select.emit('row', r);
+            }).on('end', function() {
+                select.emit('end');
+            });
+
+            return select;
         };
 
-        function Insert() {}
+        function Insert() {
+            EventEmitter.call(this);
+        }
+        util.inherits(Insert, EventEmitter);
 
         Transaction.prototype.insert = function(relation, row) {
             if (relation.constructor !== Relation) {
@@ -1547,19 +1497,19 @@ var RelationalDataModel = function() {
                 s = row_to_insert(relation, row);
 
             console.log('[' + s + ']');
-            this.tx.query(s, function(e, r) {
-                if (e === null) {
-                    if (insert.onsuccess !== undefined) {
-                        insert.onsuccess(r.rows[0]);
-                    }
+            
+            this.tx.query(s).on('error', function(e) {
+                if (insert.listeners('error').length > 0) {
+                    insert.emit('error',e);
                 } else {
-                    console.log('insert [' + e + ']');
-                    this_transaction.error += e + '\n';
-                    if (insert.onerror !== undefined) {
-                        insert.onerror(e);
-                    }
+                    this_transaction.emit('error', e);
                 }
+            }).on('row', function(r) {
+                insert.emit('row', r);
+            }).on('end', function() {
+                insert.emit('end');
             });
+
             return insert;
         };
 

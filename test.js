@@ -12,25 +12,29 @@ var account_managers = rdm.relation('account_managers', {
 var v = rdb.validate('pg://pm:test123@localhost/pm', 1.0, [account_managers], true);
 v.onerror = console.log;
 v.onsuccess = function(db) {
-    var t = db.transaction(function(tx) {
+    db.transaction(function(tx) {
         [
             {id: 1, name: 'Anna'},
             {id: 2, name: 'Betty'},
             {id: 3, name: 'Christine'},
-            {id: 3, name: 'Christine'}
+            //{id: 3, name: 'Christine'}
         ].forEach(function(k) {
-            tx.insert(account_managers, k).onsuccess = function(results) {
-                console.log('Saved record for ' + k.name + ' with id ' + results.id);
+            tx.insert(account_managers, k).on('row', function(r) {
+                console.log('Saved record for ' + r.name + ' with id ' + r.id);
+            }).on('end', function() {
                 tx.insert(account_managers, {id: 4});
-            };
+            });
         })
+    }).on('error', function(error) {
+        console.log('[transaction ' + error + ']');
+    }).on('end', function() {
+        console.log('[transaction done]');
+        db.transaction(function(tx) {
+            tx.select(account_managers).on('row', function(r) {
+                console.log('row: id=' + r.id + ' name=' + r.name);
+            });
+        });   
     });
-    t.onerror = function(error) {
-        console.log('test ' + JSON.stringify(error));
-    };
-    t.onsuccess = function() {
-        console.log('[done]');
-    };
 };
 
 /*
