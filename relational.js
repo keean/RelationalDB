@@ -1108,6 +1108,8 @@ var RelationalDataModel = function() {
 
     this.PostgreSQLDataAdapter = function() {
 
+        // SQL code generator
+
         function expression_to_sql(exp, qualified) {
             switch(exp.id) {
             case EEq:
@@ -1342,6 +1344,8 @@ var RelationalDataModel = function() {
             );
         }
 
+        // node-postgres driver
+
         var pg_begin = function(client, f) {
             console.log('[transaction begin]');
             //client.pauseDrain();
@@ -1372,7 +1376,13 @@ var RelationalDataModel = function() {
             client.query('select pg_sleep(' + s + ')', f);
         };
 
-        function Validate() {}
+        var EventEmitter = require('events').EventEmitter;
+        var util = require('util');
+
+        function Validate() {
+            EventEmitter.call(this);
+        }
+        util.inherits(Validate, EventEmitter);
 
         function ValidDb(db) {
             this.db = db;
@@ -1381,44 +1391,30 @@ var RelationalDataModel = function() {
         this_sql = this;
 
         this.validate = function(name, version, relations, drop) {
-            var validate = new Validate;
-            var pg = require('pg');
+            var validate = new Validate,
+                pg = require('pg');
+
             pg.connect(name, function(err, client) {
-                if (err !== null) {
-                    if (validate.onerror !== undefined) {
-                        console.log('[' + err + ']');
-                        validate.onerror(err);
-                    }
+                if (err) {
+                    validate.emit('error', err);
                 } else {
-                    
-                    console.log('[validation begin]');
-                    client.once('error', function(error) {
-                        console.log('[' + error + ']');
-                        if (validate.onerror !== undefined) {
-                            validate.onerror(error);
-                        }
+                    client.on('error', function(e) {
+                        validate.emit('error', e);
+                    }).once('drain', function() {
+                        console.log('[validate ready]');
+                        validate.emit('ready', new ValidDb(client));
                     });
-                    client.once('drain', function() {
-                        console.log('[validation end]');
-                        if (validate.onsuccess !== undefined) {
-                            validate.onsuccess(freeze(new ValidDb(client)));
-                        }
-                    });
+                    console.log('[validate begin]');
                     relations.forEach(function(r) {
                         if (drop) {
                             client.query('drop table if exists ' + r.sources[0]);
                         }
                         validate_table(client, r);
                     });
-                    //client.emit('error', 'test');
-                    //pg_sleep(client, 3);
                 }
             });
             return validate;
         };
-
-        var EventEmitter = require('events').EventEmitter;
-        var util = require('util');
 
         function Transaction() {
             EventEmitter.call(this);
@@ -1447,35 +1443,35 @@ var RelationalDataModel = function() {
             return transaction;
         };
 
-        function Select() {
+        function Query() {
             EventEmitter.call(this);
         }
-        util.inherits(Select, EventEmitter);
+        util.inherits(Query, EventEmitter);
         
-        Transaction.prototype.select = function(relation) {
+        Transaction.prototype.query = function(relation) {
             if (relation.constructor !== Relation) {
                 throw new TypeError('invalid relation');
             }
             
             var this_transaction = this,
-                select = new Select,
+                query = new Query,
                 s = relation_to_select(relation, true);
 
             console.log('[' + s + ']');
 
             this.tx.query(s).on('error', function(e) {
-                if (select.listeners('error').length > 0) {
-                    select.emit('error', e);
+                if (query.listeners('error').length > 0) {
+                    query.emit('error', e);
                 } else {
                     this_transaction.emit('error', e);
                 }
             }).on('row', function(r) {
-                select.emit('row', r);
+                query.emit('row', r);
             }).on('end', function() {
-                select.emit('end');
+                query.emit('end');
             });
 
-            return select;
+            return query;
         };
 
         function Insert() {
@@ -1513,6 +1509,11 @@ var RelationalDataModel = function() {
             return insert;
         };
 
+        function Update() {
+            EventEmitter.call(this);
+        }
+        util.inherits(Update, EventEmitter);
+
         Transaction.prototype.update = function(relation, row, exp, success) {
             if (relation.constructor !== Relation) {
                 throw new TypeError('invalid relation');
@@ -1522,16 +1523,29 @@ var RelationalDataModel = function() {
                 throw new TypeError('relation is not updateable');
             }
             
-            var s = row_to_update(relation, row, exp);
-            alert(s);
-            this.tx.executeSql(s, [], function(tx, result) {
-                if (success !== undefined) {
-                    success(result.rowsAffected);
+            var this_transaction = this,
+                update = new Update,
+                s = row_to_update(relation, row, exp);
+
+            console.log('[' + s + ']');
+
+            this.tx.query(s).on('error', function(e) {
+                if (update.listeners('error').length > 0) {
+                    update.emit('error',e);
+                } else {
+                    this_transaction.emit('error', e);
                 }
+            }).on('row', function(r) {
+                update.emit('row', r);
+            }).on('end', function() {
+                update.emit('end');
             });
         };
 
-        function Remove() {}
+        function Remove() {
+            EventEmitter.call(this);
+        }
+        util.inherits(Remove, EventEmitter);
 
         Transaction.prototype.remove  = function(relation, exp) {
             if (relation.constructor !== Relation) {
@@ -1546,33 +1560,20 @@ var RelationalDataModel = function() {
                 remove = new Remove,
                 s = relation_to_remove(relation, exp);
 
-            alert(s);
-            this.tx.executeSql(s, [], 
-                function(t, r) {
-                    if (remove.onsuccess !== undefined) {
-                        try {
-                            remove.onsuccess(r.rowsAffected);
-                        } catch(e) {
-                            this_transaction.error = e;
-                            throw e;
-                        }
-                    }
-                },
-                function(t, e) {
-                    if (remove.onerror !== undefined) {
-                        try {
-                            remove.onerror(e);
-                            return false;
-                        } catch(e) {
-                            this_transaction.error = e;
-                            throw e;
-                        }
-                    } else {
-                        this_transaction.error = e;
-                        return true;
-                    }
+            console.log('[' + s + ']');
+        
+            this.tx.query(s).on('error', function(e) {
+                if (remove.listeners('error').length > 0) {
+                    remove.emit('error', e);
+                } else {
+                    this_transaction.emit('error', e);
                 }
-            );
+            }).on('row', function(r) {
+                remove.emit('row', r);
+            }).on('end', function() {
+                remove.emit('row');
+            });
+                
             return remove;
         }
     };

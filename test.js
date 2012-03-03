@@ -9,9 +9,14 @@ var account_managers = rdm.relation('account_managers', {
     name: rdm.attribute('name', rdm.string, {unique: true}),
 });
 
-var v = rdb.validate('pg://pm:test123@localhost/pm', 1.0, [account_managers], true);
-v.onerror = console.log;
-v.onsuccess = function(db) {
+rdb.validate(
+    'pg://pm:test123@localhost/pm',
+    1.0,
+    [account_managers],
+    true
+).on('error', function(error) {
+    console.log('[validate ' + error + ']');
+}).on('ready', function(db) {
     db.transaction(function(tx) {
         [
             {id: 1, name: 'Anna'},
@@ -30,12 +35,12 @@ v.onsuccess = function(db) {
     }).on('end', function() {
         console.log('[transaction done]');
         db.transaction(function(tx) {
-            tx.select(account_managers).on('row', function(r) {
+            tx.query(account_managers).on('row', function(r) {
                 console.log('row: id=' + r.id + ' name=' + r.name);
             });
         });   
     });
-};
+});
 
 /*
 v.onerror = console.log;
