@@ -8,6 +8,11 @@ var RelationalDataModel = function() {
     }
 
     //--------------------------------------------------------------------
+    // Schema
+
+    this.schema = {};
+
+    //--------------------------------------------------------------------
     // Domains
 
     var Type = function(name, id) {
@@ -516,6 +521,10 @@ var RelationalDataModel = function() {
     };
 
     Relation.prototype.restrict = function(exp) {
+        if (!exp) {
+            return this;
+        }
+
         if (!valid_expression(this, exp)) {
             throw new TypeError('restrict argument is not a valid expression');
         }
@@ -614,6 +623,8 @@ var RelationalDataModel = function() {
             n.relation = r;
             r.attributes[a] = freeze(n);
         }
+
+        this.schema[name] = freeze(r);
 
         return freeze(r);
     };
@@ -865,18 +876,18 @@ var RelationalDataModel = function() {
 
         this_sql = this;
 
-        this.validate = function(name, version, relations, drop) {
+        this.validate = function(name, version, drop) {
             var validate = new Validate,
                 db = openDatabase(name, version, "relaional data model v1.0", 4096);
 
             db.transaction(
                 function(tx) {
-                    relations.forEach(function(r) {
+                    for (var r in this_rdm.schema) if (this_rdm.schema.hasOwnProperty(r)) {
                         if (drop) {
-                            tx.executeSql('drop table if exists ' + r.sources[0]);
+                            tx.executeSql('drop table if exists ' + this_rdm.schema[r].sources[0]);
                         }
-                        validate_table(tx, r);
-                    })
+                        validate_table(tx, this_rdm.schema[r]);
+                    }
                 },
                 function(error) {
                     if (validate.onerror !== undefined) {
@@ -1246,14 +1257,16 @@ var RelationalDataModel = function() {
                 } else {
                     sql += ', ';
                 }
-                sql += att.name + ' ' + type_to_affinity(att.type);
-                var qal = att.qualifiers;
+                sql += att.name + ' ';
+                var typ = type_to_affinity(att.type),
+                    qal = att.qualifiers;
                 if (qal !== undefined) {
-                    if (qal.auto_increment === true) {
-                        var seq = relation.name + '_'  + att.name + '_seq';
-                        client.query('create sequence ' + seq);
-                        sql += " primary key default nextval('" + seq + "')";
-                    } else if (qal.primary_key === true) {
+                    if (qal.auto_increment === true && typ === 'integer') {
+                        sql += 'serial';
+                    } else {
+                        sql += typ;
+                    }
+                    if (qal.primary_key === true) {
                         sql += ' primary key';
                     }
                     if (qal.unique === true) {
@@ -1272,25 +1285,41 @@ var RelationalDataModel = function() {
             client.query(sql + ')');
         }
 
-        function row_to_insert(relation, row) {
-            var attrs = [],
+        function merge_keys(objs) {
+            var keys = {};
+            var attrs = [];
+            for (var i = objs.length; i--;) for (var k in objs[i]) if (objs[i].hasOwnProperty(k) && !keys[k]) {
+                console.log(k);
+                attrs.push(k);
+                keys[k] = true;
+            }
+            return attrs;
+        }
+
+        function row_to_insert(relation, rows) {
+            if (!(rows.constructor === Array)) rows = [rows];
+            var attrs = merge_keys(rows),
                 values = [];
 
-            for (var key in row) if (row.hasOwnProperty(key)) {
-                if (relation.attributes[key] === undefined) {
-                    throw new TypeError("invalid attribute '" + key + "' for relation '" + relation.name + "'");
-                }
+            for (var i = rows.length; i--;) {
+                values[i] = [];
+                for (var j = attrs.length; j--;) {
+                    if (relation.attributes[attrs[j]] === undefined) {
+                        throw new TypeError("invalid attribute '" + attrs[j] + "' for relation '" + relation.name + "'");
+                    }
 
-                var value = wrap_literal(row[key]);
-                if (!valid_expression(relation, value)) {
-                    throw new TypeError('invalid expression');
-                }
+                    var value = wrap_literal(rows[i][attrs[j]]);
+                    if (!valid_expression(relation, value)) {
+                        throw new TypeError('invalid expression');
+                    }
 
-                attrs.push(key);
-                values.push(expression_to_sql(value));
+                    values[i].push(expression_to_sql(value));
+                }
+                values[i] = values[i].join();
             }
 
-            return 'insert into ' + relation.sources[0] + ' (' + attrs.join() + ') values (' + values.join() + ') returning *';
+
+            return 'insert into ' + relation.sources[0] + ' (' + attrs.join() + ') values (' + values.join('), (') + ') returning *';
         }
 
         function row_to_update(relation, row, exp) {
@@ -1332,19 +1361,15 @@ var RelationalDataModel = function() {
         function validate_table(client, relation) {
             client.query("select column_name from information_schema.columns where table_name=$1", [relation.name],
                 function(err, results) {
-                    create_table(client, relation);
-                    //if (results.rows.length > 0) {
-                    //    if (sql !== results.rows.item(0).sql.toLowerCase()) {
-                    //        throw new TypeError("relation '" + relation.name + "'validation failed");
-                    //    }
-                    //} else {
-                    //    client.query(sql);
-                    //}
+                    if (results.rows.length === 0) {
+                        create_table(client, relation);
+                    }
                 }
             );
         }
 
         // node-postgres driver
+        var pg = require('pg');
 
         var pg_begin = function(client, f) {
             console.log('[transaction begin]');
@@ -1390,9 +1415,8 @@ var RelationalDataModel = function() {
 
         this_sql = this;
 
-        this.validate = function(name, version, relations, drop) {
-            var validate = new Validate,
-                pg = require('pg');
+        this.validate = function(name, version, drop) {
+            var validate = new Validate;
 
             pg.connect(name, function(err, client) {
                 if (err) {
@@ -1402,18 +1426,39 @@ var RelationalDataModel = function() {
                         validate.emit('error', e);
                     }).once('drain', function() {
                         console.log('[validate ready]');
-                        validate.emit('ready', new ValidDb(client));
+                        validate.emit('ready', new ValidDb(name));
                     });
                     console.log('[validate begin]');
-                    relations.forEach(function(r) {
+                    for (var r in this_rdm.schema) if (this_rdm.schema.hasOwnProperty(r)) {
                         if (drop) {
-                            client.query('drop table if exists ' + r.sources[0]);
+                            client.query('drop table if exists ' + this_rdm.schema[r].sources[0]);
                         }
-                        validate_table(client, r);
-                    });
+                        validate_table(client, this_rdm.schema[r]);
+                    };
                 }
             });
             return validate;
+        };
+
+        function Connection() {
+            EventEmitter.call(this);
+        }
+        util.inherits(Connection, EventEmitter);
+
+        ValidDb.prototype.connect = function() {
+            var connect = new Connection,
+                db = this.db;
+            process.nextTick(function() {
+                pg.connect(db, function(err, client) {
+                    if (err) {
+                        connect.emit('error', err);
+                    } else {
+                        connect.db = client;
+                        connect.emit('ready', connect);
+                    }
+                });
+            });
+            return connect;
         };
 
         function Transaction() {
@@ -1421,7 +1466,7 @@ var RelationalDataModel = function() {
         }
         util.inherits(Transaction, EventEmitter);
 
-        ValidDb.prototype.transaction = function(transfn) {
+        Connection.prototype.transaction = function(transfn) {
             var transaction = new Transaction,
                 db = this.db;
 
@@ -1429,10 +1474,10 @@ var RelationalDataModel = function() {
                 transaction.emit('error', e);
             }).on('end', function() {
                 db.once('drain', function() {
+                    console.log('[transaction end]');
                     db.query('commit').on('error', function(e) {
                         transaction.emit('error', e);
                     }).on('end', function() {
-                        console.log('[transaction end]');
                         transaction.emit('end');
                     });
                 });
@@ -1514,7 +1559,7 @@ var RelationalDataModel = function() {
         }
         util.inherits(Update, EventEmitter);
 
-        Transaction.prototype.update = function(relation, row, exp, success) {
+        Transaction.prototype.update = function(relation, row, exp) {
             if (relation.constructor !== Relation) {
                 throw new TypeError('invalid relation');
             }
@@ -1540,6 +1585,8 @@ var RelationalDataModel = function() {
             }).on('end', function() {
                 update.emit('end');
             });
+
+            return update;
         };
 
         function Remove() {
@@ -1571,7 +1618,7 @@ var RelationalDataModel = function() {
             }).on('row', function(r) {
                 remove.emit('row', r);
             }).on('end', function() {
-                remove.emit('row');
+                remove.emit('end');
             });
                 
             return remove;
