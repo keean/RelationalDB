@@ -1,3 +1,7 @@
+// Relational Algebra Library for JavaScript
+// Copyright 2010,2011,2012 Keean Schupke, All rights reserved
+// Licensed under LGPL v3.0, see license.txt for terms.
+
 var RelationalDataModel = function() {
     var this_rdm = this,
         name_regex = /^[A-Za-z][_0-9A-Za-z]*$/,
